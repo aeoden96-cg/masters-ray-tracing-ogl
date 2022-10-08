@@ -1,0 +1,6 @@
+[submodule "source/opengl_renderer"]
+	path = util/renderer
+	url = git@github.com:aeoden96/opengl_renderer.git
+[submodule "source/opengl_shader"]
+	path = util/shader
+	url = git@github.com:aeoden96/opengl_shader.git
