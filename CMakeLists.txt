@@ -14,7 +14,6 @@ target_link_libraries(
         PROJECT LINK_PUBLIC
         SHADER RENDERER
 
-        -lassimp
         -lGLEW -lGL -lGLU -lglut -lpthread -lm)
 
 
