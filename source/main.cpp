@@ -32,31 +32,17 @@ int WindowWidth;
 const double Xmin = 0.0, Xmax = 3.0;
 const double Ymin = 0.0, Ymax = 3.0;
 
-// this is the quad's vertex shader in an ugly C string
-const char* vert_shader_str =
-        "#version 430\n                                                               \
-layout (location = 0) in vec2 vp;\n                                           \
-layout (location = 1) in vec2 vt;\n                                           \
-out vec2 st;\n                                                                \
-\n                                                                            \
-void main () {\n                                                              \
-  st = vt;\n                                                                  \
-  gl_Position = vec4 (vp, 0.0, 1.0);\n                                        \
-}\n";
 
 // this is the quad's fragment shader in an ugly C string
-const char* frag_shader_str =
-        "#version 430\n                                                               \
-in vec2 st;\n                                                                 \
-uniform sampler2D img;\n                                                      \
-out vec4 fc;\n                                                                \
-\n                                                                            \
-void main () {\n                                                              \
-  fc = texture (img, st);\n                                                 \
-}\n";
+
 GLuint create_quad_vao() {
     GLuint vao = 0, vbo = 0;
-    float verts[] = { -1.0f, -1.0f, 0.0f, 0.0f, -1.0f, 1.0f, 0.0f, 1.0f, 1.0f, -1.0f, 1.0f, 0.0f, 1.0f, 1.0f, 1.0f, 1.0f };
+    float verts[] =
+            { -1.0f, -1.0f, 0.0f, 0.0f,
+              -1.0f, 1.0f, 0.0f, 1.0f,
+              1.0f, -1.0f, 1.0f, 0.0f,
+              1.0f, 1.0f, 1.0f, 1.0f
+            };
     glGenBuffers( 1, &vbo );
     glBindBuffer( GL_ARRAY_BUFFER, vbo );
     glBufferData( GL_ARRAY_BUFFER, 16 * sizeof( float ), verts, GL_STATIC_DRAW );
@@ -70,24 +56,12 @@ GLuint create_quad_vao() {
     glVertexAttribPointer( 1, 2, GL_FLOAT, GL_FALSE, stride, (GLvoid*)offset );
     return vao;
 }
-GLuint create_quad_program() {
-    GLuint program     = glCreateProgram();
-    GLuint vert_shader = glCreateShader( GL_VERTEX_SHADER );
-    glShaderSource( vert_shader, 1, &vert_shader_str, NULL );
-    glCompileShader( vert_shader );
-    glAttachShader( program, vert_shader );
-    GLuint frag_shader = glCreateShader( GL_FRAGMENT_SHADER );
-    glShaderSource( frag_shader, 1, &frag_shader_str, NULL );
-    glCompileShader( frag_shader );
-    glAttachShader( program, frag_shader );
-    glLinkProgram( program );
-    return program;
-}
+
 
 //compute shader
 int tex_w = 512, tex_h = 512;
 GLuint tex_output;
-GLuint ray_shader;
+
 GLuint ray_program;
 
 GLuint quad_vao     ;
@@ -96,6 +70,8 @@ glm::vec2 mousePos(0,0);
 
 Renderer simpleRenderer(true,GL_TRIANGLES);
 Shader simpleShader;
+
+Shader quadShader;
 
 
 void glutPassiveMotionFunc(int x, int y ) {
@@ -134,19 +110,23 @@ void mySpecialKeyFunc( int key, int x, int y )
 }
 
 void setupComputeShader(){
-//    //setup the compute shader
+    //setup the compute shader
 
-
-    glGenTextures(1, &tex_output);
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, tex_output);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, tex_w, tex_h, 0, GL_RGBA, GL_FLOAT,
-                 NULL);
-    glBindImageTexture(0, tex_output, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
+    // texture handle and dimensions
+    tex_output = 0;
+    // create the texture
+    glGenTextures( 1, &tex_output );
+    glActiveTexture( GL_TEXTURE0 );
+    glBindTexture( GL_TEXTURE_2D, tex_output );
+    glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+    glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+    // linear allows us to scale the window up retaining reasonable quality
+    glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+    glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+    // same internal format as compute shader input
+    glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA32F, tex_w, tex_h, 0, GL_RGBA, GL_FLOAT, NULL );
+    // bind to image unit so can write to specific pixels from the shader
+    glBindImageTexture( 0, tex_output, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F );
 
     int work_grp_cnt[3];
 
@@ -202,7 +182,6 @@ int main(int argc, char ** argv)
 	glewInit();
 
     setupComputeShader();
-
 	init_data();
 
 	// Omogući uporabu Z-spremnika
@@ -215,125 +194,32 @@ int main(int argc, char ** argv)
 
 
 
-
-
 bool init_data()
 {
 	glClearColor( 1.0f, 1.0f, 1.0f, 1.0f );
 
     quad_vao = create_quad_vao();
-    quad_program = create_quad_program();
+    quad_program = quadShader.create_quad_program();
 
-//    simpleShader.loadShaders({"TempShader.vert", "TempShader.frag", "","",""});
-//
-//    const std::vector<GLfloat> data{
-//            0.0f, 0.0f,
-//            0.0f, 0.5f,
-//            0.5f, 0.5f,
-//    };
-
-//    simpleRenderer._setup_data(data,std::vector<int>({2}));
-
-    //shader string
-    const char* compute_shader_str =
-            "#version 430\n                                                               \
-layout (local_size_x = 1, local_size_y = 1) in;\n                             \
-layout (rgba32f, binding = 0) uniform image2D img_output;\n                   \
-\n                                                                            \
-void main () {\n                                                              \
-  vec4 pixel = vec4 (0.0, 0.0, 0.0, 1.0);\n                                   \
-  ivec2 pixel_coords = ivec2 (gl_GlobalInvocationID.xy);\n                    \
-\n                                                                            \
-float max_x = 5.0;\n                                                          \
-float max_y = 5.0;\n                                                          \
-ivec2 dims = imageSize (img_output);\n                                        \
-float x = (float(pixel_coords.x * 2 - dims.x) / dims.x);\n                    \
-float y = (float(pixel_coords.y * 2 - dims.y) / dims.y);\n                    \
-vec3 ray_o = vec3 (x * max_x, y * max_y, 0.0);\n                              \
-vec3 ray_d = vec3 (0.0, 0.0, -1.0); // ortho\n                                \
-\n                                                                            \
-vec3 sphere_c = vec3 (0.0, 0.0, -10.0);                                       \
-float sphere_r = 1.0;                                                         \
-\n                                                                            \
-vec3 omc = ray_o - sphere_c;\n                                                \
-float b = dot (ray_d, omc);\n                                                 \
-float c = dot (omc, omc) - sphere_r * sphere_r;\n                             \
-float bsqmc = b * b - c;\n                                                    \
-float t = 10000.0;\n                                                          \
-// hit one or both sides\n                                                    \
-if (bsqmc >= 0.0) {\n                                                         \
-  pixel = vec4 (0.4, 0.4, 1.0, 1.0);\n                                        \
-}\n                                                                           \
-\n                                                                            \
-  imageStore (img_output, pixel_coords, pixel);\n                             \
-}\n";
-
-    ray_shader = glCreateShader(GL_COMPUTE_SHADER);
-    glShaderSource(ray_shader, 1, &compute_shader_str, NULL);
-    glCompileShader(ray_shader);
-// check for compilation errors as per normal here
-
-    ray_program = glCreateProgram();
-    glAttachShader(ray_program, ray_shader);
-    glLinkProgram(ray_program);
-// check for linking errors and validate program as per normal here
-
-// check for linking errors and validate program as per normal here
-
-
-
-    // texture handle and dimensions
-    tex_output = 0;
-    int tex_w = 512, tex_h = 512;
-    { // create the texture
-        glGenTextures( 1, &tex_output );
-        glActiveTexture( GL_TEXTURE0 );
-        glBindTexture( GL_TEXTURE_2D, tex_output );
-        glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
-        glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
-        // linear allows us to scale the window up retaining reasonable quality
-        glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
-        glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
-        // same internal format as compute shader input
-        glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA32F, tex_w, tex_h, 0, GL_RGBA, GL_FLOAT, NULL );
-        // bind to image unit so can write to specific pixels from the shader
-        glBindImageTexture( 0, tex_output, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F );
-    }
-
-    { // query up the workgroups
-        int work_grp_size[3], work_grp_inv;
-        // maximum global work group (total work in a dispatch)
-        glGetIntegeri_v( GL_MAX_COMPUTE_WORK_GROUP_COUNT, 0, &work_grp_size[0] );
-        glGetIntegeri_v( GL_MAX_COMPUTE_WORK_GROUP_COUNT, 1, &work_grp_size[1] );
-        glGetIntegeri_v( GL_MAX_COMPUTE_WORK_GROUP_COUNT, 2, &work_grp_size[2] );
-        printf( "max global (total) work group size x:%i y:%i z:%i\n", work_grp_size[0], work_grp_size[1], work_grp_size[2] );
-        // maximum local work group (one shader's slice)
-        glGetIntegeri_v( GL_MAX_COMPUTE_WORK_GROUP_SIZE, 0, &work_grp_size[0] );
-        glGetIntegeri_v( GL_MAX_COMPUTE_WORK_GROUP_SIZE, 1, &work_grp_size[1] );
-        glGetIntegeri_v( GL_MAX_COMPUTE_WORK_GROUP_SIZE, 2, &work_grp_size[2] );
-        printf( "max local (in one shader) work group sizes x:%i y:%i z:%i\n", work_grp_size[0], work_grp_size[1], work_grp_size[2] );
-        // maximum compute shader invocations (x * y * z)
-        glGetIntegerv( GL_MAX_COMPUTE_WORK_GROUP_INVOCATIONS, &work_grp_inv );
-        printf( "max computer shader invocations %i\n", work_grp_inv );
-    }
-
-
-
+    ray_program = quadShader.create_compute_program();
 
     return true;
 }
 
-
+void draw_quad()
+{
+    glClear(GL_COLOR_BUFFER_BIT);
+    glUseProgram(quad_program);
+    glBindVertexArray(quad_vao);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, tex_output);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+}
 
 void myDisplay() {
 
     glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-//    std::vector<glm::mat4> MVPs;
-//    MVPs.push_back(glm::mat4(1.0f));
-//
-//    simpleRenderer.render_static(simpleShader,MVPs);
 
     // launch compute shaders!
     glUseProgram(ray_program);
@@ -343,12 +229,7 @@ void myDisplay() {
     glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
 
     // normal drawing pass
-    glClear(GL_COLOR_BUFFER_BIT);
-    glUseProgram(quad_program);
-    glBindVertexArray(quad_vao);
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, tex_output);
-    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    draw_quad();
 
     glutSwapBuffers();
     glutPostRedisplay();
@@ -381,8 +262,6 @@ void resizeWindow(int w, int h)
 		windowXmin = Xmin;
 		windowXmax = Xmax;
 	}
-
-
 
 }
 
